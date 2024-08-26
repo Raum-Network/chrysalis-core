@@ -1,18 +1,20 @@
-use soroban_sdk::{contractclient, contractspecfn, Address, Env, BytesN};
+use soroban_sdk::{contractclient, contractspecfn, Address, Env};
 
 pub struct Spec;
 
 /// Interface for StakingContract
 #[contractspecfn(name = "Spec", export = false)]
-#[contractclient(name = "StakingContractClient")]
+#[contractclient(name = "ChrysalisClient")]
 
 /// Trait defining the interface for a Staking Contract.
-pub trait StakingContractTrait {
+pub trait ChrysalisContractTrait {
 
     /*  *** Read-only functions: *** */
 
+    fn initializeContract(env: Env, staked_token_address: Address, steth_address: Address);
+
     /// Returns the current staked amount for the user.
-    fn get_stake(e: Env, user: Address) -> i64;
+    fn get_stake_amount(e: Env, user: Address) -> i64;
 
     /// Returns the current balance of stETH for the user.
     // fn get_steth_balance(e: Env, user: Address) -> i64;
@@ -26,7 +28,7 @@ pub trait StakingContractTrait {
     /// * `e` - An instance of the `Env` struct.
     /// * `user` - The address of the user staking the tokens.
     /// * `amount` - The amount of the custom token to stake.
-    fn stake(e: Env, user: Address, amount: i64);
+    fn stakeETH(e: Env, user: Address, amount: i64);
 
     /// Unstakes a specified amount using stETH, burns the stETH, and returns the original tokens.
     /// 
@@ -35,5 +37,5 @@ pub trait StakingContractTrait {
     /// * `e` - An instance of the `Env` struct.
     /// * `user` - The address of the user unstaking the tokens.
     /// * `amount` - The amount of stETH to use for unstaking.
-    fn unstake(e: Env, user: Address, amount: i64);
+    fn unstakeETH(e: Env, user: Address, amount: i64);
 }
