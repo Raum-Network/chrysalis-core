@@ -2,9 +2,10 @@
 
 mod contract_interface;
 
-use soroban_sdk::{contractimpl , contract, contracttype, Address, Env, IntoVal, Symbol};
+use soroban_sdk::{contractimpl  , Vec , contract, contracttype, Address, Env, IntoVal, Symbol};
 use contract_interface::ChrysalisContractTrait;
 
+#[contracttype]
 #[derive(Clone, Debug)]
 pub struct Stake {
     amount: i64,
@@ -20,10 +21,11 @@ impl Default for Stake {
     }
 }
 
+
 #[contract]
 struct ChrysalisContract;
 
-#[derive(Clone)]
+#[derive(Clone )]
 #[contracttype]
 enum DataKey {
     Stake(Address),
@@ -34,12 +36,12 @@ enum DataKey {
 #[contractimpl]
 impl ChrysalisContractTrait for ChrysalisContract {
     
-    fn initializeContract(env: Env, staked_token_address: Address, steth_address: Address) {
+    fn initialize_contract(env: Env, staked_token_address: Address, steth_address: Address) {
         env.storage().instance().set(&DataKey::StakedTokenAddress, &staked_token_address);
         env.storage().instance().set(&DataKey::StETHAddress, &steth_address);
     }
 
-    fn stakeETH(env: Env, user: Address, amount: i64) {
+    fn stake_eth(env: Env, user: Address, amount: i64) {
         let staked_token_address: Address = env.storage().instance().get(&DataKey::StakedTokenAddress).unwrap();
         let steth_address: Address = env.storage().instance().get(&DataKey::StETHAddress).unwrap();
 
@@ -51,47 +53,121 @@ impl ChrysalisContractTrait for ChrysalisContract {
 
         assert!(balance >= amount, "Insufficient balance");
 
-        env.invoke_contract(
+        env.invoke_contract::<()>(
             &staked_token_address,
             &Symbol::new(&env.clone(), "transfer"),
-            (&user, &env.current_contract_address(), &amount).into_val(&env),
+            Vec::from_array(
+                &env,
+                [
+                    user.into_val(&env.clone()),
+                    env.current_contract_address().into_val(&env.clone()),
+                    amount.into_val(&env.clone()),
+                ]
+            ),
         );
 
-        env.invoke_contract(
+
+        env.invoke_contract::<()>(
             &steth_address,
             &Symbol::new(&env.clone(), "mint"),
-            (&env.current_contract_address(), &user, &amount).into_val(&env),
+            Vec::from_array(
+                &env,
+                [
+                    env.current_contract_address().into_val(&env.clone()),
+                    user.into_val(&env.clone()),
+                    amount.into_val(&env.clone()),
+                ]
+            ),
         );
 
-        let mut stakes = env.storage().instance().get::<Address, Stake>(&user.clone()).unwrap_or_default();
+        let mut stakes: Stake = env.storage().instance().get(&user.clone()).unwrap();
+
         stakes.amount += amount;
         stakes.timestamp = env.ledger().timestamp();
         env.storage().instance().set(&DataKey::Stake(user), &stakes);
     }
 
-    fn unstakeETH(env: Env, user: Address, amount: i64) {
-        let staked_token_address: Address = env.storage().get_unchecked(DataKey::StakedTokenAddress).unwrap();
-        let steth_address: Address = env.storage().get_unchecked(DataKey::StETHAddress).unwrap();
+    fn unstake_eth(env: Env, user: Address, amount: i64) -> () {
+        let staked_token_address: Address = env.storage().instance().get(&DataKey::StakedTokenAddress).unwrap();
+        let steth_address: Address = env.storage().instance().get(&DataKey::StETHAddress).unwrap();
 
-        env.invoke_contract(
+        env.invoke_contract::<()>(
             &steth_address,
-            &Symbol::new(env.clone(), "burn"),
-            (&user, &amount).into_val(&env),
+            &Symbol::new(&env.clone(), "burn"),
+            Vec::from_array(
+                &env,
+                [
+                    user.into_val(&env.clone()),
+                    amount.into_val(&env.clone()),
+                ]
+            ),
         );
 
-        env.invoke_contract(
+        env.invoke_contract::<()>(
             &staked_token_address,
-            &Symbol::new(env.clone(), "transfer"),
-            (&env.current_contract_address(), &user, &amount).into_val(&env),
+            &Symbol::new(&env.clone(), "transfer"),
+            Vec::from_array(
+                &env,
+                [
+                    env.current_contract_address().into_val(&env.clone()),
+                    user.into_val(&env.clone()),
+                    amount.into_val(&env.clone()),
+                ]
+            ),
         );
 
-        let mut stakes = env.storage().get::<Address, Stake>(user.clone()).unwrap_or_default();
+        let mut stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
         stakes.amount -= amount;
-        env.storage().set(DataKey::Stake(user), stakes);
+        env.storage().instance().set(&DataKey::Stake(user), &stakes);
     }
 
     fn get_stake_amount(env: Env, user: Address) -> i64 {
-        let stakes = env.storage().get::<Address, Stake>(user).unwrap_or_default();
+        let stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
         stakes.amount
+    }
+
+    fn claim(env: Env, user: Address) -> i64 {
+        let mut stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
+        
+        // Assuming simple interest for rewards calculation:
+        let reward_rate = 0.05; // 5% reward rate per unit of time
+        let current_timestamp = env.ledger().timestamp();
+        let staking_duration = current_timestamp - stakes.timestamp;
+
+        let rewards = (stakes.amount as f64 * reward_rate * staking_duration as f64 / 1_000_000.0) as i64;
+        stakes.timestamp = current_timestamp;
+
+        // Transfer rewards to the user
+        let steth_address: Address = env.storage().instance().get(&DataKey::StETHAddress).unwrap();
+        env.invoke_contract::<()>(
+            &steth_address,
+            &Symbol::new(&env.clone(), "mint"),
+            Vec::from_array(
+                &env,
+                [
+                    env.current_contract_address().into_val(&env.clone()),
+                    user.into_val(&env.clone()),
+                    rewards.into_val(&env.clone()),
+                ]
+            ),
+        );
+
+        // Update the stakes
+        env.storage().instance().set(&DataKey::Stake(user), &stakes);
+
+        rewards
+    }
+
+    // New Verify Claim Function
+    fn vclaim(env: Env, user: Address) -> i64 {
+        let stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
+
+        // Assuming simple interest for rewards calculation:
+        let reward_rate = 0.05; // 5% reward rate per unit of time
+        let current_timestamp = env.ledger().timestamp();
+        let staking_duration = current_timestamp - stakes.timestamp;
+
+        let rewards = (stakes.amount as f64 * reward_rate * staking_duration as f64 / 1_000_000.0) as i64;
+        rewards
     }
 }

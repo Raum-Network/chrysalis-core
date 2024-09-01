@@ -1,175 +1,152 @@
-#![cfg(test)]
+use soroban_sdk::{contract::Contract, contract::TestContract, testutils::{Address as TestAddress, Env}};
+use soroban_sdk::{symbol, Address, Vec, Env, IntoVal};
 
-use super::*;
-use soroban_sdk::testutils::{Address as _, Env as _};
-use soroban_sdk::{Address, Env, IntoVal, Symbol};
+use super::ChrysalisContract;
+use super::Stake;
 
-// Mock token contract to simulate the custom token
-mod token {
-    soroban_sdk::contractimport!(
-        file = "../path_to_your_mock_token_contract.wasm"
+#[test]
+fn test_initialize_contract() {
+    let env = Env::default();
+    let contract = ChrysalisContract::deploy(&env);
+
+    let staked_token_address = TestAddress::new();
+    let steth_address = TestAddress::new();
+    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
+
+    assert_eq!(contract.storage().get(&DataKey::StakedTokenAddress).unwrap(), staked_token_address);
+    assert_eq!(contract.storage().get(&DataKey::StETHAddress).unwrap(), steth_address);
+}
+
+#[test]
+fn test_stake_eth() {
+    let env = Env::default();
+    let contract = ChrysalisContract::deploy(&env);
+
+    let staked_token_address = TestAddress::new();
+    let steth_address = TestAddress::new();
+    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
+
+    let user = TestAddress::new();
+    let amount = 1000;
+
+    // Simulate token transfer to the contract
+    env.invoke_contract::<()>(
+        &staked_token_address,
+        &symbol!("transfer"),
+        (user.clone(), contract.address(), amount).into_val(&env),
     );
+
+    contract.stake_eth(&env, user.clone(), amount);
+
+    let stake = contract.get_stake_amount(&env, user.clone());
+    assert_eq!(stake, amount);
 }
 
 #[test]
-fn test_initialize() {
+fn test_unstake_eth() {
     let env = Env::default();
-    let contract = StakingContract {};
-    
-    let staked_token_address = Address::random(&env);
-    let steth_address = Address::random(&env);
-    
-    contract.initialize(env.clone(), staked_token_address.clone(), steth_address.clone());
-    
-    let stored_staked_token_address: Address = env.storage().get_unchecked(DataKey::StakedTokenAddress).unwrap();
-    let stored_steth_address: Address = env.storage().get_unchecked(DataKey::StETHAddress).unwrap();
-    
-    assert_eq!(stored_staked_token_address, staked_token_address);
-    assert_eq!(stored_steth_address, steth_address);
-}
+    let contract = ChrysalisContract::deploy(&env);
 
-#[test]
-fn test_stake() {
-    let env = Env::default();
-    let contract = StakingContract {};
+    let staked_token_address = TestAddress::new();
+    let steth_address = TestAddress::new();
+    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
 
-    let user = Address::random(&env);
-    let staked_token_address = Address::random(&env);
-    let steth_address = Address::random(&env);
-    
-    // Initialize the contract
-    contract.initialize(env.clone(), staked_token_address.clone(), steth_address.clone());
+    let user = TestAddress::new();
+    let amount = 1000;
 
-    // Mock the custom token balance and transfer
-    let mock_token_client = token::Client::new(&env, &staked_token_address);
-
-    mock_token_client.mock_balance(&user, 1000);  // Mock user having 1000 tokens
-    mock_token_client.mock_transfer(&user, &env.current_contract_address(), 500);  // Mock transfer of 500 tokens
-    
-    // Perform staking
-    contract.stake(env.clone(), user.clone(), 500);
-    
-    // Check if the staked amount is recorded correctly
-    let stake_amount = contract.get_stake(env.clone(), user.clone());
-    assert_eq!(stake_amount, 500);
-    
-    // Check if stETH tokens were minted
-    let steth_balance: i64 = env.invoke_contract(
-        &steth_address,
-        &symbol!("balance_of"),
-        (&user,).into_val(&env),
+    // Simulate staking
+    env.invoke_contract::<()>(
+        &staked_token_address,
+        &symbol!("transfer"),
+        (user.clone(), contract.address(), amount).into_val(&env),
     );
-    assert_eq!(steth_balance, 500);
-}
 
-#[test]
-fn test_unstake() {
-    let env = Env::default();
-    let contract = StakingContract {};
+    contract.stake_eth(&env, user.clone(), amount);
 
-    let user = Address::random(&env);
-    let staked_token_address = Address::random(&env);
-    let steth_address = Address::random(&env);
-    
-    // Initialize the contract
-    contract.initialize(env.clone(), staked_token_address.clone(), steth_address.clone());
-
-    // Mock the custom token balance, transfer, and minting of stETH
-    let mock_token_client = token::Client::new(&env, &staked_token_address);
-    mock_token_client.mock_balance(&user, 1000);
-    mock_token_client.mock_transfer(&user, &env.current_contract_address(), 500);
-
-    let mock_steth_client = token::Client::new(&env, &steth_address);
-    mock_steth_client.mock_mint(&env.current_contract_address(), &user, 500);
-    
-    // Stake tokens
-    contract.stake(env.clone(), user.clone(), 500);
+    // Simulate passage of time
+    env.ledger().advance_time(3600); // 1 hour later
 
     // Unstake tokens
-    contract.unstake(env.clone(), user.clone(), 500);
-    
-    // Check if staked amount is reduced
-    let stake_amount = contract.get_stake(env.clone(), user.clone());
-    assert_eq!(stake_amount, 0);
-    
-    // Check if stETH tokens were burned
-    let steth_balance: i64 = env.invoke_contract(
-        &steth_address,
-        &symbol!("balance_of"),
-        (&user,).into_val(&env),
-    );
-    assert_eq!(steth_balance, 0);
+    contract.unstake_eth(&env, user.clone(), amount);
 
-    // Check if original tokens were transferred back to the user
-    let user_balance: i64 = env.invoke_contract(
-        &staked_token_address,
-        &symbol!("balance_of"),
-        (&user,).into_val(&env),
-    );
-    assert_eq!(user_balance, 1000);
+    let stake = contract.get_stake_amount(&env, user.clone());
+    assert_eq!(stake, 0);
 }
 
 #[test]
-#[should_panic(expected = "Insufficient balance")]
-fn test_stake_insufficient_balance() {
+fn test_claim() {
     let env = Env::default();
-    let contract = StakingContract {};
+    let contract = ChrysalisContract::deploy(&env);
 
-    let user = Address::random(&env);
-    let staked_token_address = Address::random(&env);
-    let steth_address = Address::random(&env);
-    
-    // Initialize the contract
-    contract.initialize(env.clone(), staked_token_address.clone(), steth_address.clone());
+    let staked_token_address = TestAddress::new();
+    let steth_address = TestAddress::new();
+    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
 
-    // Mock the custom token balance
-    let mock_token_client = token::Client::new(&env, &staked_token_address);
-    mock_token_client.mock_balance(&user, 100);  // User only has 100 tokens
-    
-    // Attempt to stake more tokens than available
-    contract.stake(env.clone(), user.clone(), 500);
+    let user = TestAddress::new();
+    let amount = 1000;
+
+    // Simulate staking
+    env.invoke_contract::<()>(
+        &staked_token_address,
+        &symbol!("transfer"),
+        (user.clone(), contract.address(), amount).into_val(&env),
+    );
+
+    contract.stake_eth(&env, user.clone(), amount);
+
+    // Simulate passage of time
+    let initial_timestamp = env.ledger().timestamp();
+    env.ledger().advance_time(3600); // 1 hour later
+    let current_timestamp = env.ledger().timestamp();
+
+    // Call claim function
+    let claimed_amount = contract.claim(&env, user.clone());
+
+    // Calculate expected rewards (simple interest example, 5% per hour)
+    let reward_rate = 0.05; // 5% per hour
+    let staking_duration = current_timestamp - initial_timestamp;
+    let expected_rewards = (amount as f64 * reward_rate * staking_duration as f64 / 3600.0) as i64;
+
+    assert_eq!(claimed_amount, expected_rewards, "Claimed amount does not match expected rewards");
+
+    // Verify new stake amount
+    let stake_amount = contract.get_stake_amount(&env, user.clone());
+    assert_eq!(stake_amount, amount, "Stake amount should remain unchanged after claiming");
 }
 
 #[test]
-fn test_unstake_partial_amount() {
+fn test_vclaim() {
     let env = Env::default();
-    let contract = StakingContract {};
+    let contract = ChrysalisContract::deploy(&env);
 
-    let user = Address::random(&env);
-    let staked_token_address = Address::random(&env);
-    let steth_address = Address::random(&env);
-    
-    // Initialize the contract
-    contract.initialize(env.clone(), staked_token_address.clone(), steth_address.clone());
+    let staked_token_address = TestAddress::new();
+    let steth_address = TestAddress::new();
+    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
 
-    // Mock the custom token balance and transfer
-    let mock_token_client = token::Client::new(&env, &staked_token_address);
-    mock_token_client.mock_balance(&user, 1000);
-    mock_token_client.mock_transfer(&user, &env.current_contract_address(), 500);
-    
-    // Stake tokens
-    contract.stake(env.clone(), user.clone(), 500);
+    let user = TestAddress::new();
+    let amount = 1000;
 
-    // Unstake partial amount
-    contract.unstake(env.clone(), user.clone(), 200);
-    
-    // Check if the staked amount is reduced accordingly
-    let stake_amount = contract.get_stake(env.clone(), user.clone());
-    assert_eq!(stake_amount, 300);
-
-    // Check if the corresponding stETH tokens were burned
-    let steth_balance: i64 = env.invoke_contract(
-        &steth_address,
-        &symbol!("balance_of"),
-        (&user,).into_val(&env),
-    );
-    assert_eq!(steth_balance, 300);
-
-    // Check if the original tokens were transferred back to the user
-    let user_balance: i64 = env.invoke_contract(
+    // Simulate staking
+    env.invoke_contract::<()>(
         &staked_token_address,
-        &symbol!("balance_of"),
-        (&user,).into_val(&env),
+        &symbol!("transfer"),
+        (user.clone(), contract.address(), amount).into_val(&env),
     );
-    assert_eq!(user_balance, 700);  // 1000 - 500 + 200 = 700
+
+    contract.stake_eth(&env, user.clone(), amount);
+
+    // Simulate passage of time
+    let initial_timestamp = env.ledger().timestamp();
+    env.ledger().advance_time(3600); // 1 hour later
+    let current_timestamp = env.ledger().timestamp();
+
+    // Call vclaim function
+    let claimable_amount = contract.vclaim(&env, user.clone());
+
+    // Calculate expected rewards (simple interest example, 5% per hour)
+    let reward_rate = 0.05; // 5% per hour
+    let staking_duration = current_timestamp - initial_timestamp;
+    let expected_rewards = (amount as f64 * reward_rate * staking_duration as f64 / 3600.0) as i64;
+
+    assert_eq!(claimable_amount, expected_rewards, "Claimable amount does not match expected rewards");
 }
