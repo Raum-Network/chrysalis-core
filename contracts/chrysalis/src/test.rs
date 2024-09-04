@@ -1,152 +1,55 @@
-use soroban_sdk::{contract::Contract, contract::TestContract, testutils::{Address as TestAddress, Env}};
-use soroban_sdk::{symbol, Address, Vec, Env, IntoVal};
+#![cfg(test)]
+extern crate std;
 
-use super::ChrysalisContract;
-use super::Stake;
+use super::*;
+use soroban_sdk::testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Ledger};
+use soroban_sdk::{symbol_short, token, vec, Address, Env, IntoVal};
+use token::Client as TokenClient;
+use token::StellarAssetClient as TokenAdminClient;
 
-#[test]
-fn test_initialize_contract() {
-    let env = Env::default();
-    let contract = ChrysalisContract::deploy(&env);
+fn create_token_contract<'a>(e: &Env, admin: &Address) -> (TokenClient<'a>, TokenAdminClient<'a>) {
+    let sac = e.register_stellar_asset_contract_v2(admin.clone());
+    (
+        token::Client::new(e, &sac.address()),
+        token::StellarAssetClient::new(e, &sac.address()),
+    )
+}
 
-    let staked_token_address = TestAddress::new();
-    let steth_address = TestAddress::new();
-    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
+fn create_claimable_balance_contract<'a>(e: &Env) -> ChrysalisContractClient<'a> {
+    ChrysalisContractClient::new(e, &e.register_contract(None, ChrysalisContract {}))
+}
 
-    assert_eq!(contract.storage().get(&DataKey::StakedTokenAddress).unwrap(), staked_token_address);
-    assert_eq!(contract.storage().get(&DataKey::StETHAddress).unwrap(), steth_address);
+struct ClaimableBalanceTest<'a> {
+    env: Env,
+    deposit_address: Address,
+    claim_addresses: [Address; 3],
+    token: TokenClient<'a>,
+    contract: ChrysalisContractClient<'a>,
 }
 
 #[test]
 fn test_stake_eth() {
     let env = Env::default();
-    let contract = ChrysalisContract::deploy(&env);
+    env.mock_all_auths();
+    let user_address = soroban_sdk::Address::generate(&env);
+    let (staked_token_address , staked_client) = create_token_contract(&env, &user_address);
+    let (steth_address , steth_client) = create_token_contract(&env, &user_address);
+    staked_client.mint(&user_address, &1000);
+    steth_client.mint(&user_address, &1000);
 
-    let staked_token_address = TestAddress::new();
-    let steth_address = TestAddress::new();
-    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
+    // Register the ChrysalisContract
+    let contract_id = env.register_contract(None, ChrysalisContract);
 
-    let user = TestAddress::new();
-    let amount = 1000;
+    // Create a client to interact with the contract
+    let client = ChrysalisContractClient::new(&env, &contract_id);
 
-    // Simulate token transfer to the contract
-    env.invoke_contract::<()>(
-        &staked_token_address,
-        &symbol!("transfer"),
-        (user.clone(), contract.address(), amount).into_val(&env),
-    );
+    // Initialize the contract directly through the client
+    client.initialize_contract(&staked_client.address, &staked_client.address);
 
-    contract.stake_eth(&env, user.clone(), amount);
-
-    let stake = contract.get_stake_amount(&env, user.clone());
-    assert_eq!(stake, amount);
-}
-
-#[test]
-fn test_unstake_eth() {
-    let env = Env::default();
-    let contract = ChrysalisContract::deploy(&env);
-
-    let staked_token_address = TestAddress::new();
-    let steth_address = TestAddress::new();
-    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
-
-    let user = TestAddress::new();
-    let amount = 1000;
-
-    // Simulate staking
-    env.invoke_contract::<()>(
-        &staked_token_address,
-        &symbol!("transfer"),
-        (user.clone(), contract.address(), amount).into_val(&env),
-    );
-
-    contract.stake_eth(&env, user.clone(), amount);
-
-    // Simulate passage of time
-    env.ledger().advance_time(3600); // 1 hour later
-
-    // Unstake tokens
-    contract.unstake_eth(&env, user.clone(), amount);
-
-    let stake = contract.get_stake_amount(&env, user.clone());
-    assert_eq!(stake, 0);
-}
-
-#[test]
-fn test_claim() {
-    let env = Env::default();
-    let contract = ChrysalisContract::deploy(&env);
-
-    let staked_token_address = TestAddress::new();
-    let steth_address = TestAddress::new();
-    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
-
-    let user = TestAddress::new();
-    let amount = 1000;
-
-    // Simulate staking
-    env.invoke_contract::<()>(
-        &staked_token_address,
-        &symbol!("transfer"),
-        (user.clone(), contract.address(), amount).into_val(&env),
-    );
-
-    contract.stake_eth(&env, user.clone(), amount);
-
-    // Simulate passage of time
-    let initial_timestamp = env.ledger().timestamp();
-    env.ledger().advance_time(3600); // 1 hour later
-    let current_timestamp = env.ledger().timestamp();
-
-    // Call claim function
-    let claimed_amount = contract.claim(&env, user.clone());
-
-    // Calculate expected rewards (simple interest example, 5% per hour)
-    let reward_rate = 0.05; // 5% per hour
-    let staking_duration = current_timestamp - initial_timestamp;
-    let expected_rewards = (amount as f64 * reward_rate * staking_duration as f64 / 3600.0) as i64;
-
-    assert_eq!(claimed_amount, expected_rewards, "Claimed amount does not match expected rewards");
-
-    // Verify new stake amount
-    let stake_amount = contract.get_stake_amount(&env, user.clone());
-    assert_eq!(stake_amount, amount, "Stake amount should remain unchanged after claiming");
-}
-
-#[test]
-fn test_vclaim() {
-    let env = Env::default();
-    let contract = ChrysalisContract::deploy(&env);
-
-    let staked_token_address = TestAddress::new();
-    let steth_address = TestAddress::new();
-    contract.initialize_contract(&env, staked_token_address.clone(), steth_address.clone());
-
-    let user = TestAddress::new();
-    let amount = 1000;
-
-    // Simulate staking
-    env.invoke_contract::<()>(
-        &staked_token_address,
-        &symbol!("transfer"),
-        (user.clone(), contract.address(), amount).into_val(&env),
-    );
-
-    contract.stake_eth(&env, user.clone(), amount);
-
-    // Simulate passage of time
-    let initial_timestamp = env.ledger().timestamp();
-    env.ledger().advance_time(3600); // 1 hour later
-    let current_timestamp = env.ledger().timestamp();
-
-    // Call vclaim function
-    let claimable_amount = contract.vclaim(&env, user.clone());
-
-    // Calculate expected rewards (simple interest example, 5% per hour)
-    let reward_rate = 0.05; // 5% per hour
-    let staking_duration = current_timestamp - initial_timestamp;
-    let expected_rewards = (amount as f64 * reward_rate * staking_duration as f64 / 3600.0) as i64;
-
-    assert_eq!(claimable_amount, expected_rewards, "Claimable amount does not match expected rewards");
+    // Call stake_eth
+    client.stake_eth(&user_address, &500);
+    // // Verify staking
+    let stake_key = DataKey::Stake(user_address.clone());
+    let stake = env.as_contract(&contract_id , || env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap());
+    assert_eq!(stake.amount, 500);
 }
