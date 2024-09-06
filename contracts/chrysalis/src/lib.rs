@@ -198,14 +198,15 @@ impl ChrysalisContractTrait for ChrysalisContract {
 
     // New Verify Claim Function
     fn vclaim(env: Env, user: Address) -> i128 {
-        let stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
+        let stakes: Stake = env.storage().instance().get(&DataKey::Stake(user.clone())).unwrap_or_default();
 
+        log!(&env, "Stake Amount: {}", stakes.amount);
         // Assuming simple interest for rewards calculation:
         let reward_rate = 0.05; // 5% reward rate per unit of time
         let current_timestamp = env.ledger().timestamp();
         let staking_duration = current_timestamp - stakes.timestamp;
-
-        let rewards = (stakes.amount as f64 * reward_rate * staking_duration as f64 / 1_000_000.0) as i64;
+        log!(&env, "Staking Duration: {}", staking_duration , current_timestamp);
+        let rewards: i128 = (stakes.amount as f64 * reward_rate * staking_duration as f64 / 1_000_000.0) as i128;
         rewards.into()
-    }
+    }   
 }
