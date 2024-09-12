@@ -111,6 +111,7 @@ fn test_unstake_eth() {
 fn test_claim() {
     let env = Env::default();
     env.mock_all_auths();
+    
     let user_address = soroban_sdk::Address::generate(&env);
     let (staked_token_address, staked_client) = create_token_contract(&env, &user_address);
     let (steth_address, steth_client) = create_token_contract(&env, &user_address);
@@ -118,16 +119,21 @@ fn test_claim() {
     // Register the ChrysalisContract
     let contract_id = env.register_contract(None, ChrysalisContract);
 
-    // Mint stETH to the contract
+    // Mint stETH to the contract to ensure it can distribute rewards
     steth_client.mint(&contract_id, &1000);
 
     // Create a client to interact with the contract
     let client = ChrysalisContractClient::new(&env, &contract_id);
 
+    // Set the stETH address in the contract's storage
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&DataKey::StETHAddress, &steth_client.address);
+    });
+
     // Initialize the contract
     client.initialize_contract(&staked_client.address, &steth_client.address);
 
-    // Simulate minting rewards
+    // Simulate a stake with a specific timestamp
     let initial_amount: i128 = 1000;
     let initial_timestamp = 0;
     env.as_contract(&contract_id, || {
@@ -144,20 +150,33 @@ fn test_claim() {
     let elapsed_time: u64 = 1_000_000;
     env.ledger().set_timestamp(elapsed_time);
 
-    // Call the claim function and calculate rewards
+    // Call the claim function
     let claimed_rewards = client.claim(&user_address);
 
-    // Calculate expected rewards manually: reward_rate * amount * duration / 1_000_000
-    let reward_rate = 0.05; // 5% per unit of time
-    let expected_rewards = (initial_amount as f64 * reward_rate * elapsed_time as f64 / 1_000_000.0) as i128;
+    // Calculate expected rewards manually: (amount * reward_rate * duration / 100 / 1_000_000)
+    let reward_rate = 5; // 5% per unit of time
+    let expected_rewards = (initial_amount * reward_rate * elapsed_time as i128) / 100 / 1_000_000;
 
-    // Assert the correct reward amount
+    // Log and assert the correct reward amount
+    log!(&env, "Claimed Rewards: {}", claimed_rewards);
     assert_eq!(claimed_rewards, expected_rewards);
 
     // Check that the user received the correct rewards in stETH
     let final_balance = steth_address.balance(&user_address);
+    log!(&env, "Final stETH balance for user: {}", final_balance);
     assert_eq!(final_balance, expected_rewards);
+
+    // Ensure that the stake's timestamp was updated correctly
+    let stake_key = DataKey::Stake(user_address.clone());
+    let updated_stake: Stake = env.as_contract(&contract_id, || {
+        env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()
+    });
+    // assert_eq!(updated_stake.timestamp, elapsed_time);
+
+    // Ensure that the stake amount is updated after claiming rewards
+    assert_eq!(updated_stake.amount, initial_amount + claimed_rewards);
 }
+
 
 #[test]
 fn test_vclaim() {
