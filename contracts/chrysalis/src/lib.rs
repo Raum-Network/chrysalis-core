@@ -1,10 +1,7 @@
 #![no_std]
 
 mod contract_interface;
-mod testold;
 mod test;
-
-use core::fmt::Display;
 
 use soroban_sdk::{contract, contractimpl, contracttype, events, log, Address, Env, IntoVal, Symbol, Vec};
 use contract_interface::ChrysalisContractTrait;
@@ -60,6 +57,7 @@ impl ChrysalisContractTrait for ChrysalisContract {
 
         assert!(balance >= amount, "Insufficient balance");
 
+        // Transfer staked ETH from user to contract
         env.invoke_contract::<()>(
             &staked_token_address,
             &Symbol::new(&env.clone(), "transfer"),
@@ -73,20 +71,21 @@ impl ChrysalisContractTrait for ChrysalisContract {
             ),
         );
 
-
+        // Transfer stETH from the contract's address to the user (instead of minting)
         env.invoke_contract::<()>(
             &steth_address,
-            &Symbol::new(&env.clone(), "mint"),
+            &Symbol::new(&env.clone(), "transfer"),
             Vec::from_array(
                 &env,
                 [
-                    // env.current_contract_address().into_val(&env.clone()),
-                    user.into_val(&env.clone()),
+                    env.current_contract_address().into_val(&env.clone()),  // From the contract's balance
+                    user.into_val(&env.clone()),                             // To the user
                     amount.into_val(&env.clone()),
                 ]
             ),
         );
 
+        // Update user's stake information
         let mut stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
         
         stakes.amount += amount;
@@ -105,19 +104,20 @@ impl ChrysalisContractTrait for ChrysalisContract {
         // Get the user's current stake
         let mut stakes: Stake = env.storage().instance().get(&DataKey::Stake(user.clone())).unwrap_or_default();
     
-        // Ensure sufficient balance to unstake
+        // Ensure sufficient stake balance to unstake
         if stakes.amount < amount {
             panic!("Insufficient balance to unstake!");
         }
     
-        // Burn stETH
+        // Transfer stETH back from user to contract (instead of burning)
         env.invoke_contract::<()>(
             &steth_address,
-            &Symbol::new(&env.clone(), "burn"),
+            &Symbol::new(&env.clone(), "transfer"),
             Vec::from_array(
                 &env,
                 [
-                    user.into_val(&env.clone()),
+                    user.into_val(&env.clone()),                             // From the user
+                    env.current_contract_address().into_val(&env.clone()),  // Back to the contract
                     amount.into_val(&env.clone()),
                 ]
             ),
@@ -130,8 +130,8 @@ impl ChrysalisContractTrait for ChrysalisContract {
             Vec::from_array(
                 &env,
                 [
-                    env.current_contract_address().into_val(&env.clone()),
-                    user.into_val(&env.clone()),
+                    env.current_contract_address().into_val(&env.clone()),  // From the contract
+                    user.into_val(&env.clone()),                             // To the user
                     amount.into_val(&env.clone()),
                 ]
             ),
@@ -171,7 +171,7 @@ impl ChrysalisContractTrait for ChrysalisContract {
     
         // Ensure rewards are non-zero
         if rewards > 0 {
-            // Mint the rewards to the user's account
+            // Transfer rewards (stETH) to the user
             let steth_address: Address = env.storage().instance().get(&DataKey::StETHAddress).unwrap();
             env.invoke_contract::<()>(
                 &steth_address,

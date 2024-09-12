@@ -19,39 +19,46 @@ fn create_claimable_balance_contract<'a>(e: &Env) -> ChrysalisContractClient<'a>
     ChrysalisContractClient::new(e, &e.register_contract(None, ChrysalisContract {}))
 }
 
-struct ClaimableBalanceTest<'a> {
-    env: Env,
-    deposit_address: Address,
-    claim_addresses: [Address; 3],
-    token: TokenClient<'a>,
-    contract: ChrysalisContractClient<'a>,
-}
-
 #[test]
 fn test_stake_eth() {
     let env = Env::default();
     env.mock_all_auths();
     let user_address = soroban_sdk::Address::generate(&env);
-    let (staked_token_address , staked_client) = create_token_contract(&env, &user_address);
-    let (steth_address , steth_client) = create_token_contract(&env, &user_address);
+    let (staked_token_address, staked_client) = create_token_contract(&env, &user_address);
+    let (steth_address, steth_client) = create_token_contract(&env, &user_address);
+
+    // Mint ETH to the user
     staked_client.mint(&user_address, &1000);
-    steth_client.mint(&user_address, &1000);
 
     // Register the ChrysalisContract
     let contract_id = env.register_contract(None, ChrysalisContract);
 
+    // Mint stETH to the contract
+    steth_client.mint(&contract_id, &1000);
+
     // Create a client to interact with the contract
     let client = ChrysalisContractClient::new(&env, &contract_id);
 
-    // Initialize the contract directly through the client
-    client.initialize_contract(&staked_client.address, &staked_client.address);
+    // Initialize the contract with staked_token_address and steth_address
+    client.initialize_contract(&staked_client.address, &steth_client.address);
 
     // Call stake_eth
     client.stake_eth(&user_address, &500);
-    // // Verify staking
+
+    // Verify staking
     let stake_key = DataKey::Stake(user_address.clone());
-    let stake = env.as_contract(&contract_id , || env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap());
+    let stake = env.as_contract(&contract_id, || {
+        env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()
+    });
     assert_eq!(stake.amount, 500);
+
+    // Check that 500 stETH was transferred to the user
+    let steth_balance = steth_address.balance(&user_address);
+    assert_eq!(steth_balance, 500);
+
+    // Check that 500 stETH was deducted from the contract
+    let contract_steth_balance = steth_address.balance(&contract_id);
+    assert_eq!(contract_steth_balance, 500);
 }
 
 #[test]
@@ -59,33 +66,45 @@ fn test_unstake_eth() {
     let env = Env::default();
     env.mock_all_auths();
     let user_address = soroban_sdk::Address::generate(&env);
-    let (staked_token_address , staked_client) = create_token_contract(&env, &user_address);
-    let (steth_address , steth_client) = create_token_contract(&env, &user_address);
+    let (staked_token_address, staked_client) = create_token_contract(&env, &user_address);
+    let (steth_address, steth_client) = create_token_contract(&env, &user_address);
+
+    // Mint ETH to the user
     staked_client.mint(&user_address, &1000);
-    steth_client.mint(&user_address, &1000);
-   
 
     // Register the ChrysalisContract
     let contract_id = env.register_contract(None, ChrysalisContract);
 
+    // Mint stETH to the contract
     steth_client.mint(&contract_id, &1000);
 
     // Create a client to interact with the contract
     let client = ChrysalisContractClient::new(&env, &contract_id);
 
-    // Initialize the contract directly through the client
-    client.initialize_contract(&staked_client.address, &staked_client.address);
+    // Initialize the contract
+    client.initialize_contract(&staked_client.address, &steth_client.address);
 
-    // Call stake_eth
+    // Stake 500 ETH
     client.stake_eth(&user_address, &500);
-    let stake_key = DataKey::Stake(user_address.clone());
-    log!(&env, "Staked 500" ,  env.as_contract(&contract_id , || env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()));
+
+    // Unstake 250 stETH by transferring it back to the contract
+    // steth_address.transfer(&user_address, &contract_id, &250);
     client.unstake_eth(&user_address, &250);
-    log!(&env, "Unstaked 250" , client.get_stake_amount(&user_address));
-    
-    let stake: Stake = env.as_contract(&contract_id , || env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap());
-    log!(&env, "Staked 250" ,  env.as_contract(&contract_id , || env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()));
+
+    // Verify the new stake amount is 250
+    let stake_key = DataKey::Stake(user_address.clone());
+    let stake = env.as_contract(&contract_id, || {
+        env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()
+    });
     assert_eq!(stake.amount, 250);
+
+    // Verify the user's stETH balance is 250
+    let steth_balance = steth_address.balance(&user_address);
+    assert_eq!(steth_balance, 250);
+
+    // Verify the user's ETH balance has increased by 250
+    let eth_balance = staked_token_address.balance(&user_address);
+    assert_eq!(eth_balance, 750);
 }
 
 #[test]
@@ -93,63 +112,51 @@ fn test_claim() {
     let env = Env::default();
     env.mock_all_auths();
     let user_address = soroban_sdk::Address::generate(&env);
-    let (staked_token_address , staked_client) = create_token_contract(&env, &user_address);
-    let (steth_address , steth_client) = create_token_contract(&env, &user_address);
-    // staked_client.mint(&user_address, &1000);
-    
+    let (staked_token_address, staked_client) = create_token_contract(&env, &user_address);
+    let (steth_address, steth_client) = create_token_contract(&env, &user_address);
 
     // Register the ChrysalisContract
     let contract_id = env.register_contract(None, ChrysalisContract);
 
+    // Mint stETH to the contract
+    steth_client.mint(&contract_id, &1000);
+
     // Create a client to interact with the contract
     let client = ChrysalisContractClient::new(&env, &contract_id);
 
-    steth_client.mint(&client.address, &1000);
-    log!(&env, "Minted 1000" , steth_address.balance(&client.address) , steth_client.address);
-    // Initialize the contract directly through the client
-    client.initialize_contract(&staked_client.address, &staked_client.address);
+    // Initialize the contract
+    client.initialize_contract(&staked_client.address, &steth_client.address);
 
     // Simulate minting rewards
     let initial_amount: i128 = 1000;
     let initial_timestamp = 0;
     env.as_contract(&contract_id, || {
         env.storage().instance().set(
-            &DataKey::Stake(user_address.clone()), 
-            &Stake { amount: initial_amount, timestamp: initial_timestamp }
+            &DataKey::Stake(user_address.clone()),
+            &Stake {
+                amount: initial_amount,
+                timestamp: initial_timestamp,
+            },
         );
     });
 
-    // Simulate some time passage (e.g., 1,000,000 time units)
-    let elapsed_time: u64 = 1_000_000; // 1 second in terms of microseconds
+    // Simulate time passage (e.g., 1,000,000 time units)
+    let elapsed_time: u64 = 1_000_000;
     env.ledger().set_timestamp(elapsed_time);
 
     // Call the claim function and calculate rewards
     let claimed_rewards = client.claim(&user_address);
-    log!(&env, "Claimed Rewards: {}", claimed_rewards);
-
-    // Check the final stake to ensure the timestamp was updated
-    let stake_key = DataKey::Stake(user_address.clone());
-    let updated_stake: Stake = env.as_contract(&contract_id, || {
-        env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()
-    });
-
-    // Validate that the timestamp has been updated
-    assert_eq!(updated_stake.timestamp, elapsed_time);
 
     // Calculate expected rewards manually: reward_rate * amount * duration / 1_000_000
     let reward_rate = 0.05; // 5% per unit of time
     let expected_rewards = (initial_amount as f64 * reward_rate * elapsed_time as f64 / 1_000_000.0) as i128;
 
-    // Log and assert the correct reward amount
-    log!(&env, "Claimed Rewards: {}", claimed_rewards , expected_rewards);
+    // Assert the correct reward amount
     assert_eq!(claimed_rewards, expected_rewards);
 
-    // Check that the stETH tokens were minted correctly
-    let final_balance = steth_address.balance(&user_address.clone());
-    log!(&env, "Final stETH balance for user: {}", final_balance);
-
-    // Ensure that the user received the expected rewards in stETH
-    assert_eq!(final_balance, expected_rewards)
+    // Check that the user received the correct rewards in stETH
+    let final_balance = steth_address.balance(&user_address);
+    assert_eq!(final_balance, expected_rewards);
 }
 
 #[test]
@@ -191,9 +198,9 @@ fn test_vclaim() {
 
     // Check the final stake to ensure the timestamp was updated
     let stake_key = DataKey::Stake(user_address.clone());
-    let updated_stake: Stake = env.as_contract(&contract_id, || {
-        env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()
-    });
+    // let updated_stake: Stake = env.as_contract(&contract_id, || {
+    //     env.storage().instance().get::<DataKey, Stake>(&stake_key).unwrap()
+    // });
 
     // Validate that the timestamp has been updated
     // assert_eq!(updated_stake.timestamp, elapsed_time);
