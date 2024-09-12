@@ -225,8 +225,8 @@ fn test_vclaim() {
     // assert_eq!(updated_stake.timestamp, elapsed_time);
 
     // Calculate expected rewards manually: reward_rate * amount * duration / 1_000_000
-    let reward_rate = 0.05; // 5% per unit of time
-    let expected_rewards: i128 = (initial_amount as f64 * reward_rate * elapsed_time as f64 / 1_000_000.0) as i128;
+    let reward_rate: i128 = 5; // 5% per unit of time
+    let expected_rewards: i128 = (initial_amount * reward_rate * elapsed_time as i128) / 100 / 1_000_000;
 
     // Log and assert the correct reward amount
     log!(&env, "Claimed Rewards: {}", claimed_rewards , expected_rewards);
