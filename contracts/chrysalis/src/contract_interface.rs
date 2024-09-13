@@ -37,8 +37,8 @@ pub trait ChrysalisContractTrait {
     /// * `amount` - The amount of stETH to use for unstaking.
     fn unstake_eth(e: Env, user: Address, amount: i128);
 
-    fn claim(env: Env, user: Address)-> i128;
+    fn claim(env: Env, user: Address , apy: i128)-> i128;
 
-    fn vclaim(env: Env, user: Address)-> i128;
+    fn vclaim(env: Env, user: Address , apy: i128)-> i128;
     
 }

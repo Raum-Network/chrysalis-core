@@ -38,9 +38,16 @@ enum DataKey {
 impl ChrysalisContractTrait for ChrysalisContract {
     
     fn initialize_contract(env: Env, staked_token_address: Address, steth_address: Address) {
+        // Check if the contract is already initialized
+        if env.storage().instance().has(&DataKey::StakedTokenAddress) {
+            panic!("Contract is already initialized");
+        }
+    
+        // Set the addresses if not initialized
         env.storage().instance().set(&DataKey::StakedTokenAddress, &staked_token_address);
         env.storage().instance().set(&DataKey::StETHAddress, &steth_address);
     }
+    
 
     fn stake_eth(env: Env, user: Address, amount: i128) {
         user.require_auth();
@@ -86,7 +93,7 @@ impl ChrysalisContractTrait for ChrysalisContract {
         );
 
         // Update user's stake information
-        let mut stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
+        let mut stakes: Stake = env.storage().instance().get(&DataKey::Stake(user.clone())).unwrap_or_default();
         
         stakes.amount += amount;
         stakes.timestamp = env.ledger().timestamp();
@@ -147,12 +154,12 @@ impl ChrysalisContractTrait for ChrysalisContract {
     
 
     fn get_stake_amount(env: Env, user: Address) -> i128 {
-        let stakes: Stake = env.storage().instance().get(&user.clone()).unwrap_or_default();
+        let stakes: Stake = env.storage().instance().get(&DataKey::Stake(user.clone())).unwrap_or_default();
         stakes.amount
     }
 
    
-    fn claim(env: Env, user: Address) -> i128 {
+    fn claim(env: Env, user: Address , apy: i128) -> i128 {
         // Ensure the user is authenticated
         user.require_auth();
         
@@ -160,7 +167,7 @@ impl ChrysalisContractTrait for ChrysalisContract {
         let mut stakes: Stake = env.storage().instance().get(&DataKey::Stake(user.clone())).unwrap_or_default();
             
         // Simple interest for rewards calculation: 5% reward rate
-        let reward_rate: i128 = 5; // 5% as an integer
+        let reward_rate: i128 = apy; // 5% as an integer
         let current_timestamp: u64 = env.ledger().timestamp();
         let staking_duration: u64 = current_timestamp - stakes.timestamp;
         
@@ -188,7 +195,7 @@ impl ChrysalisContractTrait for ChrysalisContract {
             );
         
             // Subtract the unstaked amount from the user's stake
-            stakes.amount += rewards;
+            stakes.amount -= rewards;
             log!(&env, "Updated Balance: {}", stakes.amount);
         
             // Update storage with the new stake amount
@@ -198,12 +205,12 @@ impl ChrysalisContractTrait for ChrysalisContract {
     }
 
     // New Verify Claim Function
-    fn vclaim(env: Env, user: Address) -> i128 {
+    fn vclaim(env: Env, user: Address , apy: i128) -> i128 {
         let stakes: Stake = env.storage().instance().get(&DataKey::Stake(user.clone())).unwrap_or_default();
 
         log!(&env, "Stake Amount: {}", stakes.amount);
         // Assuming simple interest for rewards calculation:
-        let reward_rate: i128 = 5; // 5% reward rate per unit of time
+        let reward_rate: i128 = apy; // 5% reward rate per unit of time
         let current_timestamp = env.ledger().timestamp();
         let staking_duration = current_timestamp - stakes.timestamp;
         log!(&env, "Staking Duration: {}", staking_duration , current_timestamp);

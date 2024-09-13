@@ -151,7 +151,7 @@ fn test_claim() {
     env.ledger().set_timestamp(elapsed_time);
 
     // Call the claim function
-    let claimed_rewards = client.claim(&user_address);
+    let claimed_rewards = client.claim(&user_address , &5);
 
     // Calculate expected rewards manually: (amount * reward_rate * duration / 100 / 1_000_000)
     let reward_rate = 5; // 5% per unit of time
@@ -212,7 +212,7 @@ fn test_vclaim() {
     env.ledger().set_timestamp(elapsed_time);
 
     // Call the claim function and calculate rewards
-    let claimed_rewards = client.vclaim(&user_address);
+    let claimed_rewards = client.vclaim(&user_address , &5);
     log!(&env, "Claimed Rewards: {}", claimed_rewards);
 
     // Check the final stake to ensure the timestamp was updated
