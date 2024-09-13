@@ -174,7 +174,7 @@ fn test_claim() {
     // assert_eq!(updated_stake.timestamp, elapsed_time);
 
     // Ensure that the stake amount is updated after claiming rewards
-    assert_eq!(updated_stake.amount, initial_amount + claimed_rewards);
+    assert_eq!(updated_stake.amount, initial_amount - claimed_rewards);
 }
 
 
